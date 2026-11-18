@@ -1,0 +1,14 @@
+name: Tests
+# The monitor's own tests, on every push to this repository (free on a public repository).
+on:
+  push:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m unittest discover -s . -p "test_*.py" -v
