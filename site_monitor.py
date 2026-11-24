@@ -217,6 +217,15 @@ def judge_cache(page_headers: dict, second_headers: dict, data_headers: dict) ->
         return FAIL, f"/data file has no max-age (Cache-Control: {dcc or 'none'}) [{who}]"
     if who == "vercel":
         return OK, f"served by Vercel, /data {dcc}"
+    if who == "cloudflare":
+        # The edge keeps Cloudflare-CDN-Cache-Control for itself (never passed on): its own
+        # cf-cache-status says what it did. DYNAMIC = not stored at the edge, asked of the origin.
+        cf = second_headers.get("cf-cache-status", "").upper()
+        origin = second_headers.get("x-qipu-cache", "")
+        detail = f"[cloudflare] /fr edge {cf or 'none'}" + (f", origin {origin}" if origin else "") + f", /data {dcc}"
+        if cf in ("HIT", "MISS", "STALE", "REVALIDATED", "EXPIRED", "UPDATING", "DYNAMIC"):
+            return OK, detail
+        return WARN, detail + " (unexpected cf-cache-status)"
     # nginx: the page is marked for the edge, and the second ask comes from the page cache
     edge = page_headers.get("cloudflare-cdn-cache-control", "")
     if "s-maxage" not in edge:
@@ -313,7 +322,7 @@ def check_tiles_and_data_site() -> list[Result]:
                       f"{r.status or r.error}, {r.headers.get('content-type', '?')}, {len(r.body)} bytes, {r.ms} ms", r.ms, "tiles"))
     url, needle = DATA_SITE
     r = fetch(url)
-    ok = r.status == 200 and needle in r.text
+    ok = r.status == 200 and needle.lower() in r.text.lower()   # the site says "Qipu data"
     out.append(Result("data.qipu.org", OK if ok else FAIL, f"{r.status or r.error} in {r.ms} ms", r.ms, "data"))
     return out
 
@@ -434,6 +443,10 @@ def judge_status(st: dict, now: float, prev_restarts: dict | None) -> list[tuple
         more = {n: c - prev_restarts.get(n, 0) for n, c in restarts.items() if c > prev_restarts.get(n, 0)}
         out.append(("server restarts", WARN if more else OK,
                     ("restarted since the last run: " + ", ".join(f"{n} +{c}" for n, c in more.items())) if more else "none since the last run"))
+    if "reboot_required" in st:
+        out.append(("server reboot pending", WARN if st["reboot_required"] else OK,
+                    f"an update waits for a reboot ({st.get('reboot_packages', 0)} packages): do it at a quiet hour (RELIABILITY.md)"
+                    if st["reboot_required"] else "none"))
     days = st.get("cert_days_left")
     if days is not None:
         out.append(("server certificate file", FAIL if days < TLS_FAIL_DAYS else WARN if days < TLS_WARN_DAYS else OK,

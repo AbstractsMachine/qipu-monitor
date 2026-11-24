@@ -112,9 +112,15 @@ class Judgements(unittest.TestCase):
         self.assertEqual(m.judge_cache(srv, {"x-qipu-cache": "HIT"}, data)[0], OK)
         self.assertEqual(m.judge_cache(srv, {"x-qipu-cache": "MISS"}, data)[0], WARN)
         self.assertEqual(m.judge_cache({"server": "nginx"}, {"x-qipu-cache": "HIT"}, data)[0], FAIL)
-        # behind Cloudflare the edge's own word counts
-        cf = {"server": "cloudflare", "cf-ray": "x", "cloudflare-cdn-cache-control": "s-maxage=1"}
-        self.assertEqual(m.judge_cache(cf, {"cf-cache-status": "HIT"}, data)[0], OK)
+        # behind Cloudflare the edge strips Cloudflare-CDN-Cache-Control; its own cf-cache-status counts
+        cf = {"server": "cloudflare", "cf-ray": "x", "cache-control": "s-maxage=31536000"}
+        for status in ("HIT", "MISS", "DYNAMIC", "STALE", "REVALIDATED", "EXPIRED"):
+            self.assertEqual(m.judge_cache(cf, {"cf-cache-status": status, "x-qipu-cache": "HIT"}, data)[0], OK, status)
+        self.assertEqual(m.judge_cache(cf, {"cf-cache-status": "BYPASS"}, data)[0], WARN)
+        self.assertEqual(m.judge_cache(cf, {}, data)[0], WARN)
+        self.assertEqual(m.judge_cache(cf, {"cf-cache-status": "HIT"}, {})[0], FAIL)
+        # the server's own address still has to mark pages for the edge
+        self.assertEqual(m.judge_cache({"server": "nginx/1.28", "x-qipu-cache": "HIT"}, {"x-qipu-cache": "HIT"}, data)[0], FAIL)
 
     def test_ask_stream(self):
         good = 'event: tool\ndata: {"name":"x"}\n\nevent: text\ndata: "La dette est de 1 234 €"\n\nevent: done\ndata: {}\n\n'
@@ -173,6 +179,10 @@ class ServerStatus(unittest.TestCase):
         down = [dict(u, active="failed") if u["name"].endswith("3001") else u for u in self.ST["units"]]
         self.assertEqual(self.levels({**self.ST, "units": down})["server processes"], FAIL)
         self.assertEqual(self.levels({**self.ST, "units": self.ST["units"][:1]})["server processes"], FAIL)
+
+    def test_reboot_pending_is_a_warning(self):
+        self.assertEqual(self.levels({**self.ST, "reboot_required": False})["server reboot pending"], OK)
+        self.assertEqual(self.levels({**self.ST, "reboot_required": True, "reboot_packages": 3})["server reboot pending"], WARN)
 
     def test_restarts_counted_between_runs(self):
         self.assertNotIn("server restarts", self.levels(self.ST, prev=None))

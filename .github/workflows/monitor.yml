@@ -53,7 +53,9 @@ jobs:
       - name: Check and notify
         env:
           BASE_URL: ${{ vars.BASE_URL || 'https://www.qipu.org' }}
-          ORIGIN_IP: ${{ secrets.ORIGIN_IP }}
+          # No ORIGIN_IP: since ~20/11 the server's firewall lets only Cloudflare in, so every origin check
+          # waited out its 60 s timeout and the job was cancelled at 8 min (SETUP.md, "Behind the Cloudflare proxy").
+          ORIGIN_IP: ""
           ORIGIN_INSECURE: ${{ vars.ORIGIN_INSECURE || '0' }}
           DNS_EXPECT: ${{ vars.DNS_EXPECT }}
           ASK_LIVE: ${{ vars.ASK_LIVE || '1' }}
